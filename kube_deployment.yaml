@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: apptaschen
+  name: taschenrechner
+spec:
+  selector:
+    matchLabels:
+      app: taschenrechner
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: taschenrechner
+    spec:
+      containers:
+      - name: taschenrechner
+        image: runner.local.lan:5555/root/application/app:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+      imagePullSecrets:
+      - name: regcred
