@@ -1,0 +1,67 @@
+variables:
+  GIT_STRATEGY: clone
+
+stages:
+  - Build
+  - Static Code
+  - Prepare SystemTest
+  - Run SystemTest
+  - Deploy
+
+build_image:
+  stage: Build
+  script: cd $CI_PROJECT_DIR && docker build -t taschenrechner .
+
+run_unittest:
+  stage: Static Code
+  script: cd $CI_PROJECT_DIR/tests && /bin/bash run_tests.sh
+
+run_style:
+  stage: Static Code
+  before_script:
+   - mkdir -p public/bagdes public/lint
+   - echo undefined > public/bagdes/$CI_JOB_NAME.score
+  script: 
+   - cd $CI_PROJECT_DIR/style && /bin/bash run_style.sh
+   - sed -n 's/^Your code has been rated at \([-0-9.]*\)\/.*/\1/p' $CI_PROJECT_DIR/style/pylint.txt > $CI_PROJECT_DIR/public/bagdes/$CI_JOB_NAME.score
+   - cp $CI_PROJECT_DIR/style/pylint.html $CI_PROJECT_DIR/public/lint/pylint.html
+  after_script:
+   - /usr/local/bin/anybadge --overwrite --label "Style" --value=$(cat  $CI_PROJECT_DIR/public/bagdes/$CI_JOB_NAME.score) --file=$CI_PROJECT_DIR/public/bagdes/style.svg 4=red 6=orange 8=yellow 10=green
+   - |
+     echo "Mein Score ist: $(cat  $CI_PROJECT_DIR/public/bagdes/$CI_JOB_NAME.score)"
+  artifacts:
+    paths:
+     - public
+    reports:
+      codequality: $CI_PROJECT_DIR/style/codeclimate.json
+    when: always
+
+prep_lb:
+  stage: Prepare SystemTest
+  script:
+   - cd $CI_PROJECT_DIR/systemtest/lb
+   - docker login http://runner.local.lan:5555 -u reguser -p 1234QWer
+   - docker build -t runner.local.lan:5555/root/application/lb:latest .
+   - docker push runner.local.lan:5555/root/application/lb
+
+prep_app:
+  stage: Prepare SystemTest
+  script:
+   - cd $CI_PROJECT_DIR
+   - docker login runner.local.lan:5555 -u reguser -p 1234QWer
+   - docker build -t runner.local.lan:5555/root/application/app:latest .
+   - docker push runner.local.lan:5555/root/application/app
+
+system_test:
+  stage: Run SystemTest
+  script: cd $CI_PROJECT_DIR/systemtest && /bin/bash run_systemtest.sh
+
+deploy_run:
+  stage: Deploy
+  script:
+   - cd $CI_PROJECT_DIR
+   - kubectl apply -f kube_ns.yaml
+   - kubectl apply -f kube_sec.yaml
+   - kubectl apply -f kube_svc.yaml
+   - kubectl apply -f kube_deployment.yaml
+   - kubectl patch deployment taschenrechner -n apptaschen -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"date\":\"`date --utc '+%FT%TZ'`\"}}}}}"
